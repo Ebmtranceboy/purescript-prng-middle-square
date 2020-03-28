@@ -1,0 +1,1 @@
+# purescript-prng-middle-square
