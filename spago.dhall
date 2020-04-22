@@ -10,8 +10,11 @@ You can edit this file as you like.
   , "foldable-traversable"
   , "integers"
   , "lists"
+  , "ordered-collections"
   , "psci-support"
+  , "rationals"
   , "tailrec"
+  , "tuples"
   ]
 , packages = ./packages.dhall
 , sources = [ "src/**/*.purs", "test/**/*.purs" ]

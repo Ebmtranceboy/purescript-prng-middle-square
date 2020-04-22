@@ -2,14 +2,20 @@ module PRNG where
 
 import Prelude
 import Data.Array (drop, (!!)) as Array
-import Data.Array ((\\), (:), length, (..), take, concat, filter)
+import Data.Array ((\\), (:), length, (..), take, concat, filter, mapWithIndex)
 import Partial.Unsafe (unsafePartial)
-import Data.Maybe (fromJust)
+import Data.Maybe (Maybe(..), fromJust, maybe)
 import Math (sqrt, log, cos, sin, pi)
 import Data.Int (toNumber)
-import Data.List (List (..), toUnfoldable)
+import Data.Map (Map, empty, insert, isEmpty, lookup, values)
+import Data.Map (filter) as Map
+import Data.Map.Internal (keys)
+import Data.List (List (..), toUnfoldable, head)
 import Control.Monad.Rec.Class (Step(..), tailRec)
 import Data.Foldable (foldr)
+import Data.Rational (Rational)
+import Data.Rational (fromInt, toNumber) as Q
+import Data.Tuple (Tuple(..))
 
 nth :: forall a. Array a -> Int -> a
 nth xs i =  unsafePartial fromJust $ xs Array.!! i
@@ -108,3 +114,92 @@ exponentials :: Dimension -> Size -> Positive -> PRNG -> Array (Array Number)
 exponentials d n lambda rnd =
   let us = concat $ uniforms 1 (d*n) 0.00001 1.0 rnd
     in chunks d $ (\u -> - log u / lambda) <$> us
+
+type Probability = Rational
+type Singleton = {option :: Int, probability :: Probability}
+type Couple = Tuple Singleton Singleton
+data Conditional = Singleton Singleton | Couple Couple
+
+instance showConditional :: Show Conditional where
+  show (Singleton s) = "Singleton" <> show s
+  show (Couple c) = "Couple" <> show c
+
+predicateConditional :: (Probability -> Boolean) -> Conditional -> Boolean
+predicateConditional f (Singleton s) = f s.probability
+predicateConditional f (Couple (Tuple s1 s2)) =
+  f $ s1.probability + s2.probability
+
+defaultConditional :: Conditional -> Boolean
+defaultConditional = predicateConditional (_ < Q.fromInt 1)
+
+excessConditional :: Conditional -> Boolean
+excessConditional = predicateConditional (_ > Q.fromInt 1)
+
+completeConditionals :: Map Int Conditional -> Boolean
+completeConditionals cs =
+  (isEmpty $ Map.filter defaultConditional cs)
+  && (isEmpty $ Map.filter excessConditional cs)
+
+-- |
+-- | Organize a discrete n-sized law of probability as an n-sized array
+-- | of singletons or couples, more suited for drawing. For instance
+-- |
+-- |  A    B    C    D    =>       I          II             III       IV
+-- | 0.2  0.3  0.1  0.4  abs:  (D:0.25) (D:0.15, C:0.1) (B:0.25) (B:0.05, A:0.2)
+-- |                     rel:  (D:1)   (D:3/5, C:2/5)    (B:1)   (B:1/5, A:4/5)
+-- |
+-- | so that P(A) = P(A|IV)P(IV) = (4/5)(1/4) = 1/5
+-- |         P(B) = P(B|III)P(III)+P(B|IV)P(IV) = (1)(1/4)+(1/5)(1/4) = 3/10
+-- |         P(C) = P(C|II)P(II) = (2/5)(1/4) = 1/10
+-- |         P(D) = P(D|I)P(I)+P(D|II)P(II) = (1)(1/4)+(3/5)(1/4) = 2/5
+-- |
+
+reshpeDiscreteDistribution :: Array Probability -> Array Conditional
+reshpeDiscreteDistribution ps =
+  let n = length $ filter (_ /= Q.fromInt 0) ps
+      initial =
+        foldr (\(Tuple i p) m ->
+          if p > Q.fromInt 0
+            then insert i
+                   (Singleton { option: i
+                              , probability: p * Q.fromInt n})
+                   m
+            else m) empty
+            $ mapWithIndex (\i p -> Tuple i p) ps
+      go cur =
+        if completeConditionals cur
+          then cur
+          else
+            let kexcess = unsafePartial $ fromJust $ head
+                          $ keys $ Map.filter excessConditional cur
+                kdefault =  unsafePartial $ fromJust $ head
+                          $ keys $ Map.filter defaultConditional cur
+                cexcess = case lookup kexcess cur of
+                  Just (Singleton s) -> Just s
+                  _                  -> Nothing
+                cdefault = case lookup kdefault cur of
+                  Just (Singleton s) -> Just s
+                  _                  -> Nothing
+                next = maybe empty identity
+                  $ (\e d ->
+                      let diff = Q.fromInt 1 - d.probability
+                      in insert kexcess (Singleton { option: e.option
+                                                   , probability: e.probability - diff
+                                                   })
+                        $ insert kdefault (Couple
+                          $ Tuple d
+                                  { option: e.option
+                                  , probability: diff
+                                  }) cur) <$> cexcess <*> cdefault
+            in go next
+  in toUnfoldable $ values $ go initial
+
+draw :: Array Conditional -> Int -> Int -> Int
+draw distribution r0 r1 =
+  case distribution !! (r0 `mod` length distribution) of
+            Singleton {option, probability} -> option
+            Couple (Tuple {option: o1, probability: p1} {option: o2, probability}) ->
+              let x = toNumber r1 / 10000.0
+                in if x < Q.toNumber p1
+                    then o1
+                    else o2

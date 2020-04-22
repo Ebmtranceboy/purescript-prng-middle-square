@@ -2,8 +2,9 @@ module Test.Main where
 
 import Prelude
 
-import PRNG (PRNG, normals, prng, uniforms, exponentials, chunks, frequency, mean, stdev)
+import PRNG (PRNG, normals, prng, uniforms, exponentials, chunks, frequency, mean, stdev, draw, reshpeDiscreteDistribution)
 import Data.Array (concat)
+import Data.Rational (fromInt) as Q
 
 import Effect (Effect)
 import Effect.Class.Console (log)
@@ -34,4 +35,8 @@ main = do
   log $ show $ mean exponentialSample -- 1 / lambda
   log $ show $ mean subExpSample      -- 1 / lambda
   log $ show $ stdev subExpSample     -- 1 / lambda / sqrt subSampleSize
+  log $ show $ draw (reshpeDiscreteDistribution [Q.fromInt 1 / Q.fromInt 3
+                                                ,Q.fromInt 1 / Q.fromInt 2
+                                                ,Q.fromInt 1 / Q.fromInt 6
+                                                ]) 1234 4567 -- 1 more frequently than 0 or 2
  
